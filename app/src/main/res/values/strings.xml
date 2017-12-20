@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">LiveDataHandler</string>
+
+    <string name="count_value">%d</string>
 </resources>

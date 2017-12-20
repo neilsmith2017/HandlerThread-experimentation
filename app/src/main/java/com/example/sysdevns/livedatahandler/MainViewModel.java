@@ -2,74 +2,124 @@ package com.example.sysdevns.livedatahandler;
 
 import android.arch.lifecycle.LifecycleObserver;
 import android.arch.lifecycle.LiveData;
+import android.arch.lifecycle.MutableLiveData;
+import android.arch.lifecycle.Transformations;
 import android.arch.lifecycle.ViewModel;
-import android.os.Handler;
-import android.os.Looper;
-import android.os.Message;
 import android.util.Log;
-
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-
-import static com.example.sysdevns.livedatahandler.BackgroundHandleThread.TASK_DONE;
 
 public class MainViewModel extends ViewModel implements LifecycleObserver {
 
     private static final String TAG = "MainViewModel";
 
-    private final ExecutorService executorService = Executors.newSingleThreadExecutor();
-    private Handler handler;
+    private final BackgroundHandlerThread backgroundHandlerThread;
 
-    private CountLiveData counter;
+    private LiveData<Integer> counter;
+    private MutableLiveData<Boolean> startButtonEnabled;
+    private MutableLiveData<Boolean> resetButtonEnabled;
+    private MutableLiveData<Boolean> stopButtonEnabled;
+    private MutableLiveData<Boolean> startNotRestart;
+
+    private boolean stopped = false;
 
     public MainViewModel() {
         Log.d(TAG, "MainViewModel: constructor");
-
-        handler = new Handler(Looper.getMainLooper()) {
-            @Override
-            public void handleMessage(Message msg) {
-                counter.setValue(msg.arg1);
-                if (!executorService.isShutdown())
-                    executorService.submit(new ViewModelRunnable(msg.arg1, handler));
-            }
-        };
-        counter = new CountLiveData();
-        counter.setValue(0);
-        executorService.submit(new ViewModelRunnable(counter.getValue(), handler));
+        backgroundHandlerThread = new BackgroundHandlerThread("Background HandleThread");
     }
 
-    public LiveData<Integer> getCounter() {
-        Log.d(TAG, "getCounter: ");
-        return counter;
+    MutableLiveData<Boolean> getStartButtonEnabled() {
+        if (startButtonEnabled == null) {
+            startButtonEnabled = new MutableLiveData<>();
+            startButtonEnabled.setValue(true);
+        }
+        return startButtonEnabled;
+    }
+
+    MutableLiveData<Boolean> getResetButtonEnabled() {
+        if (resetButtonEnabled == null) {
+            resetButtonEnabled = new MutableLiveData<>();
+            resetButtonEnabled.setValue(false);
+        }
+        return resetButtonEnabled;
+    }
+
+    MutableLiveData<Boolean> getStopButtonEnabled() {
+        if (stopButtonEnabled == null) {
+            stopButtonEnabled = new MutableLiveData<>();
+            stopButtonEnabled.setValue(false);
+        }
+        return stopButtonEnabled;
+    }
+
+    MutableLiveData<Boolean> getStartNotRestart() {
+        if (startNotRestart == null) {
+            startNotRestart = new MutableLiveData<>();
+            startNotRestart.setValue(true);
+        }
+        return startNotRestart;
+    }
+
+    LiveData<Integer> getCounter() {
+        if (counter == null) {
+            counter = backgroundHandlerThread.getCounter();
+        }
+        return Transformations.map(counter, input -> {
+            if (input == 100) {
+                onCounterFinished();
+            }
+            return input;
+        });
+    }
+
+    private void onCounterFinished() {
+        Log.d(TAG, "onCounterFinished: ");
+        stopButtonEnabled.setValue(false);
+        resetButtonEnabled.setValue(true);
     }
 
     @Override
     protected void onCleared() {
         super.onCleared();
         Log.d(TAG, "onCleared: ");
-        executorService.shutdown();
+        backgroundHandlerThread.quitSafely();
     }
 
-    static class ViewModelRunnable implements Runnable {
-
-        private Handler handler;
-        private int currentValue;
-
-        public ViewModelRunnable(int value, Handler handler) {
-            currentValue = value;
-            this.handler = handler;
+    void startCounter() {
+        if (backgroundHandlerThread.getState() == Thread.State.NEW) {
+            Log.d(TAG, "startCounter: starting thread...");
+            backgroundHandlerThread.start();
         }
-
-        @Override
-        public void run() {
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-            Message message = Message.obtain(handler, TASK_DONE);
-            message.arg1 = currentValue + 1;
-            handler.sendMessage(message);
+        if (stopped) {
+            restartCounter();
+        } else {
+            backgroundHandlerThread.startCounter();
+            startButtonEnabled.setValue(false);
+            stopButtonEnabled.setValue(true);
         }
+    }
+
+    void resetCounter() {
+        backgroundHandlerThread.resetCount();
+        stopped = false;
+        startNotRestart.setValue(true);
+        startButtonEnabled.setValue(true);
+        stopButtonEnabled.setValue(false);
+        resetButtonEnabled.setValue(false);
+    }
+
+    void stopCounter() {
+        backgroundHandlerThread.stopCounter();
+        stopped = true;
+        startNotRestart.setValue(false);
+        startButtonEnabled.setValue(true);
+        stopButtonEnabled.setValue(false);
+        resetButtonEnabled.setValue(true);
+    }
+
+    private void restartCounter() {
+        backgroundHandlerThread.restartCounter();
+        startButtonEnabled.setValue(false);
+        stopButtonEnabled.setValue(true);
+        resetButtonEnabled.setValue(false);
+        stopped = false;
     }
 }
